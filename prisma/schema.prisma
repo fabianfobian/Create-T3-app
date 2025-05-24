@@ -1,66 +1,143 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
 generator client {
-    provider = "prisma-client-js"
+  provider = "prisma-client-js" // Generates Prisma client for database access
 }
 
 datasource db {
-    provider = "sqlite"
-    // NOTE: When using postgresql, mysql or sqlserver, uncomment the @db.Text annotations in model Account below
-    // Further reading:
-    // https://next-auth.js.org/adapters/prisma#create-the-prisma-schema
-    // https://www.prisma.io/docs/reference/api-reference/prisma-schema-reference#string
-    url      = env("DATABASE_URL")
+  provider = "postgresql"        // Database provider, e.g. PostgreSQL
+  url      = env("DATABASE_URL") // Connection URL from environment variable
 }
 
-model Example {
-    id        String   @id @default(cuid())
-    createdAt DateTime @default(now())
-    updatedAt DateTime @updatedAt
+// Enum for user roles, distinguishing normal users from admins
+enum UserRole {
+  CUSTOMER
+  SELLER
+  DELIVERY
+  ADMIN
+  SUPERADMIN
 }
 
-// Necessary for Next auth
-model Account {
-    id                String  @id @default(cuid())
-    userId            String
-    type              String
-    provider          String
-    providerAccountId String
-    refresh_token     String? // @db.Text
-    access_token      String? // @db.Text
-    expires_at        Int?
-    token_type        String?
-    scope             String?
-    id_token          String? // @db.Text
-    session_state     String?
-    user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-    @@unique([provider, providerAccountId])
+// Enum for order statuses during the order lifecycle
+enum OrderStatus {
+  PENDING
+  CONFIRMED
+  SHIPPED
+  DELIVERED
+  CANCELLED
 }
 
-model Session {
-    id           String   @id @default(cuid())
-    sessionToken String   @unique
-    userId       String
-    expires      DateTime
-    user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+// Enum representing payment statuses
+enum PaymentStatus {
+  PENDING
+  COMPLETED
+  FAILED
 }
 
+// Enum for different payment methods supported
+enum PaymentMethod {
+  CREDIT_CARD
+  PAYPAL
+  BANK_TRANSFER
+  CASH_ON_DELIVERY
+}
+
+// Model representing users of the platform
 model User {
-    id            String    @id @default(cuid())
-    name          String?
-    email         String?   @unique
-    emailVerified DateTime?
-    image         String?
-    accounts      Account[]
-    sessions      Session[]
+  id        String    @id @default(uuid()) // Primary key with UUID
+  email     String    @unique              // Unique user email
+  password  String                         // Hashed password
+  role      UserRole @default(USER)       // Role: USER or ADMIN
+  name      String                         // User's full name
+  createdAt DateTime  @default(now())     // Timestamp of account creation
+  updatedAt DateTime  @updatedAt           // Timestamp of last update
+  sessions  Session[]                     // One-to-many relation to sessions
+  orders    Order[]                       // One-to-many relation to orders
+  cart      Cart?                         // One-to-one relation to user's cart (optional)
 }
 
-model VerificationToken {
-    identifier String
-    token      String   @unique
-    expires    DateTime
+// Stores active login sessions for users
+model Session {
+  id        String   @id @default(uuid()) // Unique session ID
+  userId    String                      // Foreign key to User
+  user      User     @relation(fields: [userId], references: [id])
+  token     String   @unique            // Unique session token (e.g., JWT or random string)
+  expiresAt DateTime                    // Session expiration timestamp
+}
 
-    @@unique([identifier, token])
+// Shopping cart model linked to a user
+model Cart {
+  id        String     @id @default(uuid()) // Cart ID
+  userId    String     @unique              // Each user has one cart, unique constraint
+  user      User       @relation(fields: [userId], references: [id])
+  items     CartItem[]                      // Cart can contain multiple items
+  createdAt DateTime   @default(now())     // Creation timestamp
+  updatedAt DateTime   @updatedAt           // Last updated timestamp
+}
+
+// Individual item inside a cart
+model CartItem {
+  id        String   @id @default(uuid()) // Unique ID for the cart item
+  cartId    String                       // Foreign key to Cart
+  productId String                       // Foreign key to Product
+  quantity  Int      @default(1)         // Quantity of this product in the cart
+  cart      Cart     @relation(fields: [cartId], references: [id])
+  product   Product  @relation(fields: [productId], references: [id])
+}
+
+// Product model representing items for sale
+model Product {
+  id          String       @id @default(uuid()) // Unique product ID
+  name        String                         // Product name/title
+  description String                         // Detailed description
+  price       Float                          // Price in USD or other currency
+  stock       Int                            // Number of units available
+  imageUrl    String                         // URL to product image
+  categories  Category[]   @relation("ProductCategories") // Many-to-many relation with categories
+  orders      OrderItem[]                    // Relation to orders containing this product
+  createdAt   DateTime     @default(now())   // Timestamp of product creation
+  updatedAt   DateTime     @updatedAt         // Timestamp of last update
+}
+
+// Category model to group products
+model Category {
+  id          String       @id @default(uuid()) // Unique category ID
+  name        String                         // Category name (e.g., Electronics)
+  products    Product[]    @relation("ProductCategories") // Products under this category
+  createdAt   DateTime     @default(now())   // Timestamp of category creation
+  updatedAt   DateTime     @updatedAt         // Timestamp of last update
+}
+
+// Orders placed by users
+model Order {
+  id          String       @id @default(uuid()) // Unique order ID
+  userId      String                       // Foreign key to User who placed the order
+  user        User         @relation(fields: [userId], references: [id])
+  status      OrderStatus  @default(PENDING)  // Current status of the order
+  totalAmount Float                          // Total price for the order
+  items       OrderItem[]                    // Items included in this order
+  payment     Payment?                       // Associated payment info (optional)
+  createdAt   DateTime     @default(now())   // Order creation timestamp
+  updatedAt   DateTime     @updatedAt         // Last update timestamp
+}
+
+// Represents each product item in an order
+model OrderItem {
+  id        String   @id @default(uuid()) // Unique order item ID
+  orderId   String                       // Foreign key to Order
+  productId String                       // Foreign key to Product
+  quantity  Int                          // Number of units ordered for this product
+  price     Float                        // Price per unit at order time
+  order     Order    @relation(fields: [orderId], references: [id])
+  product   Product  @relation(fields: [productId], references: [id])
+}
+
+// Payment information linked to an order
+model Payment {
+  id         String        @id @default(uuid()) // Unique payment ID
+  orderId    String                       // Foreign key to Order
+  order      Order         @relation(fields: [orderId], references: [id])
+  method     PaymentMethod                // Payment method used
+  status     PaymentStatus @default(PENDING) // Status of the payment
+  amount     Float                        // Amount paid
+  createdAt  DateTime      @default(now())   // Payment creation timestamp
+  updatedAt  DateTime      @updatedAt         // Last update timestamp
 }
